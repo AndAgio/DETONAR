@@ -2,10 +2,10 @@ import argparse
 
 
 def arg_parse():
-    parser = argparse.ArgumentParser(description='THESIS')
+    parser = argparse.ArgumentParser(description='DETONAR')
 
     # Parameters feature extractor
-    parser.add_argument('--data_dir', type=str, default='Dataset_NetSim/32_Nodes_Dataset',
+    parser.add_argument('--data_dir', type=str, default='Dataset_NetSim/16_Nodes_Dataset',
                         help="root path to data directory")
     parser.add_argument('--scenario', type=str, default='Legitimate',
                         help="name of attack/legitimate")
@@ -70,14 +70,6 @@ def arg_parse():
                                  '# broadcasted', 'incoming_vs_outgoing'],
                         nargs='+', help="features used for attack classification")
 
-    '''
-    parser.add_argument('--n_packets_in_sequence', default=20, type=int,
-                    help="number of packets in a sequence")
-    parser.add_argument('--n_train_sequences_in_flow', default=15, type=int,
-                    help="number of sequences to get from a flow")
-    parser.add_argument('--n_valid_sequences_in_flow', default=5, type=int,
-                    help="number of sequences to get from a flow")
-    '''
     args = parser.parse_args()
 
     return args
