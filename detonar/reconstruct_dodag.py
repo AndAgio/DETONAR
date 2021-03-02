@@ -9,24 +9,9 @@ import time as tm
 # Python files
 import settings_parser
 
-''' #Old extract_data_up_to function
-def extract_data_up_to(data, time):
-	#From the pandas dataframe extract only those packets arrived up to a certain second
-	condition = (data['NW_LAYER_ARRIVAL_TIME(US)']<=time*1e6)
-	data = data[condition]
-	#Remove all columns that should not be considered to compute the DODAG
-	for column in data.columns:
-		if (column!='CONTROL_PACKET_TYPE/APP_NAME' and column!='SOURCE_ID' and column!='DESTINATION_ID'):
-			data = data.drop(column, axis=1)
-	#Keep only the DAO packets which are the only one used to build the DODAG
-	data = data[data['CONTROL_PACKET_TYPE/APP_NAME']=='DAO']
-	return data
-'''
-
 
 def extract_data_up_to(data, time, args):
     # From the pandas dataframe extract only those packets arrived up to a certain second
-    # condition = (data['NW_LAYER_ARRIVAL_TIME(S)']<=time)
     condition = (data[args.time_feat_sec] <= time)
     data = data[condition]
     return data
@@ -50,40 +35,8 @@ def refine_edges_list(edges):
     return edges
 
 
-''' #Old get dodag function
-def get_dodag(data):
-	# Create the list for nodes and edges and the corresponding empty graph
-	list_of_nodes_already_added = []
-	list_of_edges_already_added = []
-	dodag = nx.Graph()
-	#For each DAO packet in the dataframe...
-	for index, row in data.iterrows():
-		#Get IDs as numbers
-		source_id = row['SOURCE_ID'].split("-")[-1]
-		destination_id = row['DESTINATION_ID'].split("-")[-1]
-		#Check if the device is already in the graph list of nodes, if not add it
-		if(source_id not in list_of_nodes_already_added):
-			list_of_nodes_already_added.append(source_id)		
-		if(destination_id not in list_of_nodes_already_added):
-			list_of_nodes_already_added.append(destination_id)
-		#Get the edge between the two nodes involved in DAO communication
-		considered_edge = (source_id, destination_id)
-		#Check id this edge is already in the graph list of edges, if not add it
-		if(considered_edge not in list_of_edges_already_added):
-			list_of_edges_already_added.append(considered_edge)
-
-	#Refine the list of edges in order to keep only most recent father-son relationships
-	list_of_edges_already_added = refine_edges_list(list_of_edges_already_added)
-	#Build the DODAG graph from nodes and edges lists
-	dodag.add_nodes_from(list_of_nodes_already_added)
-	dodag.add_edges_from(list_of_edges_already_added)
-
-	return dodag
-'''
-
 
 def get_dodag(data):
-    # tic = tm.perf_counter()
     # Get source ids and dest ids only with numbers
     source_ids = data['SOURCE_ID'].values.tolist()
     source_ids = [id.split("-")[-1] for id in source_ids]
@@ -107,14 +60,11 @@ def get_dodag(data):
     # Build the DODAG graph from nodes and edges lists
     dodag.add_nodes_from(list_of_nodes)
     dodag.add_edges_from(edges)
-    # toc = tm.perf_counter()
-    # print('New get DODAG takes: {}'.format(toc-tic))
 
     return dodag
 
 
 def extract_dodag_before_after(data, list_nodes, neighbors, time, args):
-    # print('Extracting DODAG before and after the anomaly...')
     tic = tm.perf_counter()
     # Get DODAG some time steps before the anomaly is raised
     window_time = args.time_window
@@ -145,7 +95,7 @@ def extract_dodag_before_after(data, list_nodes, neighbors, time, args):
     if (len(dodag_difference) == 0):
         return False, []
     nodes_changing = dodag_difference.nodes()
-    # print('Nodes changing: {}'.format(nodes_changing))
+
     return True, nodes_changing
 
 
@@ -161,33 +111,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-'''
-def extract_data_from_csv(path_to_file):
-	print('Reading csv file...')
-	data = pd.read_csv(path_to_file)
-	for column in data.columns:
-		if (column!='CONTROL_PACKET_TYPE/APP_NAME' and column!='SOURCE_ID' and column!='DESTINATION_ID'):
-			data = data.drop(column, axis=1)
-	#print('List of columns after\n{}'.format(data.columns))
-	data = data[data['CONTROL_PACKET_TYPE/APP_NAME']=='DAO']
-	print(data)
-	return data
-
-def extract_data_from_csv_up_to(path_to_file, time):
-	print('Reading csv file...')
-	data = pd.read_csv(path_to_file, index_col=False)
-	#print(data[data['CONTROL_PACKET_TYPE/APP_NAME']=='DAO'])
-	#print(time*1e6)
-	condition = (data['NW_LAYER_ARRIVAL_TIME(US)']<=time*1e6)
-	data = data[condition]
-	#print(data)
-	#print(data[data['CONTROL_PACKET_TYPE/APP_NAME']=='DAO'])
-	for column in data.columns:
-		if (column!='CONTROL_PACKET_TYPE/APP_NAME' and column!='SOURCE_ID' and column!='DESTINATION_ID'):
-			data = data.drop(column, axis=1)
-	#print('List of columns after\n{}'.format(data.columns))
-	data = data[data['CONTROL_PACKET_TYPE/APP_NAME']=='DAO']
-	#print(data)
-	return data
-'''
