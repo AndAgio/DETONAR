@@ -31,7 +31,6 @@ def read_csv(path_to_file):
 
 # Get list of csv files and select those for train and those for test
 def get_files(filenames, args):
-    # filenames=simulations names in a scenario
     all_files = []
     for filename in filenames:
         files = glob.glob(os.path.join(filename, '*.csv'))
@@ -93,7 +92,6 @@ def create_trains_and_tests(all_files_list, features, size):
 
 def extract_list_nodes(original_net_traffic, size, args):
     # From original traffic get training set
-    # data = original_net_traffic[original_net_traffic['NW_LAYER_ARRIVAL_TIME(US)'] < size * 10 * 1e6]
     data = original_net_traffic[original_net_traffic[args.time_feat_micro] < size * 10 * 1e6]
     # From training set get list of nodes trasmitting at least 1 packet
     list_nodes = data['TRANSMITTER_ID'].value_counts().index.to_list()
@@ -105,7 +103,6 @@ def extract_list_nodes(original_net_traffic, size, args):
 
 def extract_nodes_dests(original_net_traffic, size, args):
     # From original traffic get training set
-    # data = original_net_traffic[original_net_traffic['NW_LAYER_ARRIVAL_TIME(US)'] < size * 10 * 1e6]
     data = original_net_traffic[original_net_traffic[args.time_feat_micro] < size * 10 * 1e6]
     # From training set get list of nodes trasmitting at least 1 packet
     list_nodes = data['TRANSMITTER_ID'].value_counts().index.to_list()
@@ -128,165 +125,7 @@ def extract_nodes_dests(original_net_traffic, size, args):
     return dict_nodes_dests
 
 
-# New main function
 def main():
-    args = settings_parser.arg_parse()
-
-    # Setting file name for output txt
-    if not os.path.exists(os.path.join(os.getcwd(), 'log', 'output_txts', args.scenario)):
-        os.makedirs(os.path.join(os.getcwd(), 'log', 'output_txts', args.scenario))
-    output_filename = os.path.join(os.getcwd(), 'log', 'output_txts', args.scenario,
-                                   args.chosen_simulation.split('-')[-1] + '.txt')
-    output_file = open(output_filename, "w")
-    output_file.write("Scenario: {} - Simulation {}\n".format(args.scenario, args.chosen_simulation.split('-')[-1]))
-    # Getting data path
-    filenames = glob.glob(os.path.join(os.getcwd(), args.feat_folders, args.scenario, '*'))
-    filenames.sort()
-    all_files = get_files(filenames, args)
-    all_files = [item for item in all_files if args.chosen_simulation in item]
-    all_series_attack_classification = all_series_dict(all_files, args)
-    # print('all_series_attack_classification: {}'.format(all_series_attack_classification))
-    # Select also original packet trace file containing whole netwrok traffic that will be used for DODAG extraction
-    original_csv_file = os.path.join(os.getcwd(), '..', args.data_dir, args.scenario,
-                                     'Packet_Trace_' + str(int(args.simulation_time)) + 's',
-                                     args.chosen_simulation.split('-')[-1] + '.csv')
-    original_net_traffic = read_csv(original_csv_file)
-
-    # Select feature to be regressed
-    feature = args.feature_for_anomalies  # '# APP rcvd'
-    features = ['# DIO rcvd', '# APP rcvd', '# DAO txd']
-    # Set training steps size and precision of confidence interval
-    size = 30
-    alpha = args.alpha
-
-    # Extract lists containing series for each device
-    trains, tests, histories, predictions, conf_intervals = create_trains_and_tests(all_files, features, size)
-    list_communicating_nodes_from_train = extract_list_nodes(original_net_traffic, size, args)
-    dict_nodes_dests_from_train = extract_nodes_dests(original_net_traffic, size, args)
-    node_names = [file.split('/')[-1].split('.')[0].split('-')[-1] for file in all_files]
-    # print('Files in trains: {} each of length: {}'.format(len(trains), len(trains[0])))
-    # List to be filled with time performances
-    list_pred_times = list()
-
-    # Get length of train and test series and number of nodes
-    test_length = len(tests[features[0]][node_names[0]])
-    train_length = len(trains[features[0]][node_names[0]])
-    n_nodes = len(node_names)
-
-    # Through the length of test compute predictions in parallel
-    for time_step in range(test_length):
-        # Compute corresponding time in seconds to know when each anomaly is raised
-        time_seconds = (time_step + train_length) * args.time_window + args.time_window + 10
-        # Define list of nodes that will be checked by attack classifier
-        list_nodes_raising_anomaly = {feature: list() for feature in features}
-        list_nodes_raising_anomaly_full_name = {feature: list() for feature in features}
-        bool_raise_anomaly = False
-        for feature in features:
-            print("\rARIMA on time_step: {}/{} and feature: {}".format(time_seconds, args.simulation_time, feature),
-                  end="\r")
-            if (time_step == test_length - 1):
-                print()
-            # For each considered device compute the forecast using arima and check if this raises an anomaly
-            for node_index in range(n_nodes):
-                node_name = all_files[node_index].split('/')[-1].split('.')[0].split('-')[-1]
-                node_full_name = all_files[node_index].split('/')[-1].split('\\')[-1].split('.')[0]
-                # Monitor also time efficiency
-                tic = tm.perf_counter()
-                # Try to fit arima since it may return errors depending on matrices rank
-                try:
-                    model = pm.auto_arima(histories[feature][node_name], start_p=1, start_q=1,
-                                          test='adf',  # use adftest to find optimal 'd'
-                                          max_p=3, max_q=3,  # maximum p and q
-                                          m=1,  # frequency of series
-                                          d=None,  # let model determine 'd'
-                                          seasonal=False,  # No Seasonality
-                                          start_P=0,
-                                          D=0,  # Minimum differencing order
-                                          trace=False,
-                                          error_action='ignore',
-                                          suppress_warnings=True,
-                                          stepwise=True)
-                    output, conf_int = model.predict(n_periods=1, return_conf_int=True, alpha=alpha)
-                except:
-                    pass
-                toc = tm.perf_counter()
-                list_pred_times.append(toc - tic)
-                # Append prediction and confidence interval to the corresponding dictionary entry
-                predictions[feature][node_name].append(output)
-                conf_intervals[feature][node_name].append(conf_int)
-                # If real value is outside confidence range it is considered an anomaly
-                if (tests[feature][node_name][time_step] < conf_int[0][0] or tests[feature][node_name][time_step] >
-                        conf_int[0][1]):
-                    # Update list of nodes to be checked and raise the anomaly
-                    bool_raise_anomaly = True
-                    list_nodes_raising_anomaly[feature].append(node_name)
-                    list_nodes_raising_anomaly_full_name[feature].append(node_full_name)
-                    print('Anomaly found in node {} at time {} for feature {}'.format(node_name, time_seconds, feature))
-                # Set history of this node for next prediction
-                obs = tests[feature][node_name][time_step]
-                histories[feature][node_name] = np.append(histories[feature][node_name], obs)
-                histories[feature][node_name] = histories[feature][node_name][1:]
-        # print('list_nodes_raising_anomaly: {}'.format(list_nodes_raising_anomaly))
-        # If an anomaly is raised extract neighborhood, check the dodag structure and extract features to be used for attack classification
-        if (bool_raise_anomaly):
-            neighborhoods_dict = {feature: list() for feature in features}
-            neighborhoods_full_name_dict = {feature: list() for feature in features}
-            nodes_to_check_dict = {feature: list() for feature in features}
-            nodes_to_check_full_name_dict = {feature: list() for feature in features}
-            for feature in features:
-                neighborhoods_full_name_dict[feature], neighborhoods_dict[feature] = extract_neighborhood(
-                    original_net_traffic, list_nodes_raising_anomaly_full_name[feature], time_seconds, args)
-                # Nodes to check are the ones that have raised anomalies and their neighbours
-                nodes_to_check_dict[feature] = list_nodes_raising_anomaly[feature] + neighborhoods_dict[feature]
-                nodes_to_check_full_name_dict[feature] = list_nodes_raising_anomaly_full_name[feature] + \
-                                                         neighborhoods_full_name_dict[feature]
-            # print('neighborhoods_dict: {}'.format(neighborhoods_dict))
-            # print('nodes_to_check_dict: {}'.format(nodes_to_check_dict))
-            # Extract single list containing all nodes that raised an anomaly in either feature
-            single_list_nodes_raising_anomaly = [node for feature_anom in features for node in
-                                                 list_nodes_raising_anomaly[feature_anom]]
-            single_list_nodes_raising_anomaly = list(set(single_list_nodes_raising_anomaly))
-            # Print anomaly and nodes involved in the output file
-            output_file.write(
-                'Anomaly raised at time {}. Devices involved: {}\n'.format(time_seconds, list_nodes_raising_anomaly))
-            # print('single_list_nodes_raising_anomaly: {}'.format(single_list_nodes_raising_anomaly))
-            # Extract single list containing all neighbours of nodes that raised an anomaly in either feature
-            single_list_neighbours = [node for feature_anom in features for node in neighborhoods_dict[feature_anom]]
-            single_list_neighbours = list(set(single_list_neighbours))
-            # print('single_list_neighbours: {}'.format(single_list_neighbours))
-            # Extract single list of anomalous nodes (nodes raising anoamly + neighbours)
-            anomalous_nodes = [node for feature_anom in features for node in nodes_to_check_dict[feature_anom]]
-            anomalous_nodes = list(set(anomalous_nodes))
-            print('anomalous_nodes: {}'.format(anomalous_nodes))
-            # Extract single list of anomalous nodes (nodes raising anoamly + neighbours)
-            anomalous_nodes_full_name = [node for feature_anom in features for node in
-                                         nodes_to_check_full_name_dict[feature_anom]]
-            anomalous_nodes_full_name = list(set(anomalous_nodes_full_name))
-            # print('anomalous_nodes_full_name: {}'.format(anomalous_nodes_full_name))
-            # Check if dodag changed or not
-            dodag_changed, nodes_changing = extract_dodag_before_after(original_net_traffic,
-                                                                       single_list_nodes_raising_anomaly,
-                                                                       single_list_neighbours, time_seconds, args)
-            # Classify the attack
-            print('Nodes changing: {}'.format(nodes_changing))
-            classify_attack_from_dodag(all_series_attack_classification, original_net_traffic, anomalous_nodes,
-                                       nodes_changing,  # anomalous_nodes_full_name,
-                                       time_step + train_length, dodag_changed, list_communicating_nodes_from_train,
-                                       dict_nodes_dests_from_train, output_file, args)
-
-    # Closes txt file
-    output_file.close()
-    # Plot prediction times using box plot
-    '''
-	fig, ax = plt.subplots()
-	ax.set_title('Prediction Times')
-	ax.boxplot(list_pred_times, notch=True)
-	plt.show()
-	'''
-
-
-# New main function
-def new_main():
     tic_main = tm.perf_counter()
     args = settings_parser.arg_parse()
 
@@ -319,7 +158,6 @@ def new_main():
     apps_packets = read_csv(apps_packets_file[0])
     # Remove file containing DAOs
     all_files = [item for item in all_files if 'SENSOR' in item or 'SINKNODE' in item]
-    # print('all_files: {}'.format(all_files))
 
     all_series_attack_classification = all_series_dict(all_files, args)
     # Select also original packet trace file containing whole network traffic that will be used for DODAG extraction
@@ -340,7 +178,6 @@ def new_main():
     list_communicating_nodes_from_train = extract_list_nodes(original_net_traffic, size, args)
     dict_nodes_dests_from_train = extract_nodes_dests(original_net_traffic, size, args)
     node_names = [file.split('/')[-1].split('.')[0].split('-')[-1] for file in all_files]
-    # print('Files in trains: {} each of length: {}'.format(len(trains), len(trains[0])))
     # List to be filled with time performances
     list_pred_times = list()
 
@@ -384,7 +221,6 @@ def new_main():
                                           suppress_warnings=True,
                                           stepwise=True)
                     output, conf_int = model.predict(n_periods=1, return_conf_int=True, alpha=alpha)
-                # print('\n\n\nnode name: {}\toutput: {}\n\n\n'.format(node_name, output))
                 except:
                     pass
                 toc = tm.perf_counter()
@@ -404,10 +240,7 @@ def new_main():
                 obs = tests[feature][node_name][time_step]
                 histories[feature][node_name] = np.append(histories[feature][node_name], obs)
                 histories[feature][node_name] = histories[feature][node_name][1:]
-        # print('\nPredictions: {}\n'.format(predictions))
-        # print('list_nodes_raising_anomaly: {}'.format(list_nodes_raising_anomaly))
         toc_arima = tm.perf_counter()
-        # print('ARIMA for all features on all nodes took: {}'.format(toc_arima - tic_arima))
         # If an anomaly is raised extract neighborhood, check the dodag structure and extract features to be used for attack classification
         if (bool_raise_anomaly):
             neighborhoods_dict = {feature: list() for feature in features}
@@ -415,15 +248,12 @@ def new_main():
             nodes_to_check_dict = {feature: list() for feature in features}
             nodes_to_check_full_name_dict = {feature: list() for feature in features}
             for feature in features:
-                # neighborhoods_full_name_dict[feature], neighborhoods_dict[feature] = extract_neighborhood(original_net_traffic, list_nodes_raising_anomaly_full_name[feature], time_seconds)
                 neighborhoods_full_name_dict[feature], neighborhoods_dict[feature] = extract_neighborhood(
                     dios, list_nodes_raising_anomaly_full_name[feature], time_seconds, args)
                 # Nodes to check are the ones that have raised anomalies and their neighbours
                 nodes_to_check_dict[feature] = list_nodes_raising_anomaly[feature] + neighborhoods_dict[feature]
                 nodes_to_check_full_name_dict[feature] = list_nodes_raising_anomaly_full_name[feature] + \
                                                          neighborhoods_full_name_dict[feature]
-            # print('neighborhoods_dict: {}'.format(neighborhoods_dict))
-            # print('nodes_to_check_dict: {}'.format(nodes_to_check_dict))
             # Extract single list containing all nodes that raised an anomaly in either feature
             single_list_nodes_raising_anomaly = [node for feature_anom in features for node in
                                                  list_nodes_raising_anomaly[feature_anom]]
@@ -431,31 +261,22 @@ def new_main():
             # Print anomaly and nodes involved in the output file
             output_file.write(
                 'Anomaly raised at time {}. Devices involved: {}\n'.format(time_seconds, list_nodes_raising_anomaly))
-            # print('single_list_nodes_raising_anomaly: {}'.format(single_list_nodes_raising_anomaly))
             # Extract single list containing all neighbours of nodes that raised an anomaly in either feature
             single_list_neighbours = [node for feature_anom in features for node in neighborhoods_dict[feature_anom]]
             single_list_neighbours = list(set(single_list_neighbours))
-            # print('single_list_neighbours: {}'.format(single_list_neighbours))
             # Extract single list of anomalous nodes (nodes raising anoamly + neighbours)
             anomalous_nodes = [node for feature_anom in features for node in nodes_to_check_dict[feature_anom]]
             anomalous_nodes = list(set(anomalous_nodes))
-            # print('anomalous_nodes: {}'.format(anomalous_nodes))
             # Extract single list of anomalous nodes (nodes raising anoamly + neighbours)
             anomalous_nodes_full_name = [node for feature_anom in features for node in
                                          nodes_to_check_full_name_dict[feature_anom]]
             anomalous_nodes_full_name = list(set(anomalous_nodes_full_name))
-            # print('anomalous_nodes_full_name: {}'.format(anomalous_nodes_full_name))
             # Check if dodag changed or not
-            # dodag_changed, nodes_changing = extract_dodag_before_after(original_net_traffic, single_list_nodes_raising_anomaly,
-            #										   single_list_neighbours, time_seconds, args)
             dodag_changed, nodes_changing = extract_dodag_before_after(daos,
                                                                        single_list_nodes_raising_anomaly,
                                                                        single_list_neighbours, time_seconds, args)
 
             # Classify the attack
-            # print('Nodes changing: {}'.format(nodes_changing))
-            # classify_attack_from_dodag(all_series_attack_classification, original_net_traffic, anomalous_nodes, nodes_changing, #anomalous_nodes_full_name,
-            #						   time_step+train_length, dodag_changed, list_communicating_nodes_from_train, dict_nodes_dests_from_train, output_file, args)
             classify_attack_from_dodag(all_series_attack_classification, all_packets, ranks_vers, apps_packets,
                                        anomalous_nodes,
                                        nodes_changing,  # anomalous_nodes_full_name,
@@ -468,15 +289,14 @@ def new_main():
     toc_main = tm.perf_counter()
     print('Whole main took: {}'.format(toc_main - tic_main))
     # Plot prediction times using box plot
-    '''
-	fig, ax = plt.subplots()
-	ax.set_title('Prediction Times')
-	ax.boxplot(list_pred_times, notch=True)
-	plt.show()
-	'''
+    plot_bool = False
+    if plot_bool:
+        fig, ax = plt.subplots()
+        ax.set_title('Prediction Times')
+        ax.boxplot(list_pred_times, notch=True)
+        plt.show()
 
 
-# New main function
 def parallel_main():
     tic_main = tm.perf_counter()
     args = settings_parser.arg_parse()
@@ -510,8 +330,6 @@ def parallel_main():
     apps_packets = read_csv(apps_packets_file[0])
     # Remove file containing DAOs
     all_files = [item for item in all_files if 'SENSOR' in item or 'SINKNODE' in item]
-    # print('all_files: {}'.format(all_files))
-
     all_series_attack_classification = all_series_dict(all_files, args)
     # Select also original packet trace file containing whole network traffic that will be used for DODAG extraction
     original_csv_file = os.path.join(os.getcwd(), '..', args.data_dir, args.scenario,
@@ -520,7 +338,7 @@ def parallel_main():
     original_net_traffic = read_csv(original_csv_file)
 
     # Select feature to be regressed
-    feature = args.feature_for_anomalies  # '# APP rcvd'
+    feature = args.feature_for_anomalies
     features = ['# DIO rcvd', '# APP rcvd', '# DAO txd']
     # Set training steps size and precision of confidence interval
     size = 30
@@ -531,7 +349,6 @@ def parallel_main():
     list_communicating_nodes_from_train = extract_list_nodes(original_net_traffic, size, args)
     dict_nodes_dests_from_train = extract_nodes_dests(original_net_traffic, size, args)
     node_names = [file.split('/')[-1].split('.')[0].split('-')[-1] for file in all_files]
-    # print('Files in trains: {} each of length: {}'.format(len(trains), len(trains[0])))
     # List to be filled with time performances
     list_pred_times = list()
 
@@ -555,19 +372,12 @@ def parallel_main():
             if (time_step == test_length - 1):
                 print()
             # For each considered device compute the forecast using arima and check if this raises an anomaly
-            ##############################################################################################################################
-            #################### PARALLELIZATION HERE ####################################################################################
-            ##############################################################################################################################
+            # parallelization
             from joblib import Parallel, delayed
             with Parallel(n_jobs=12) as parallel:
-                # while variable < 10:
                 output_parallelization = parallel(
                     delayed(arima_fit)(histories, feature, node_index, all_files, tests, time_step, time_seconds, alpha)
                     for node_index in range(n_nodes))
-            # print(output_parallelization)
-            ##############################################################################################################################
-            ##############################################################################################################################
-            ##############################################################################################################################
 
             for node_index in range(n_nodes):
                 node_name = all_files[node_index].split('/')[-1].split('.')[0].split('-')[-1]
@@ -582,16 +392,11 @@ def parallel_main():
                 if (not (output_parallelization[node_index][3] == [])):
                     list_nodes_raising_anomaly[feature].append(output_parallelization[node_index][3])
                     list_nodes_raising_anomaly_full_name[feature].append(output_parallelization[node_index][4])
-            # print('\n\nlist_nodes_raising_anomaly: {}\n\n'.format(list_nodes_raising_anomaly))
-            # print('\n\nnot list_nodes_raising_anomaly == []: {}\n\n'.format(not list_nodes_raising_anomaly == []))
             if (not (list_nodes_raising_anomaly == {'# DIO rcvd': [], '# APP rcvd': [], '# DAO txd': []})):
                 bool_raise_anomaly = True
             else:
                 bool_raise_anomaly = False
-        # print('\nPredictions: {}\n'.format(predictions))
-        # print('list_nodes_raising_anomaly: {}'.format(list_nodes_raising_anomaly))
         toc_arima = tm.perf_counter()
-        # print('ARIMA for one features on all nodes took: {}'.format(toc_arima-tic_arima))
         # If an anomaly is raised extract neighborhood, check the dodag structure and extract features to be used for attack classification
         if (bool_raise_anomaly):
             neighborhoods_dict = {feature: list() for feature in features}
@@ -599,15 +404,12 @@ def parallel_main():
             nodes_to_check_dict = {feature: list() for feature in features}
             nodes_to_check_full_name_dict = {feature: list() for feature in features}
             for feature in features:
-                # neighborhoods_full_name_dict[feature], neighborhoods_dict[feature] = extract_neighborhood(original_net_traffic, list_nodes_raising_anomaly_full_name[feature], time_seconds)
                 neighborhoods_full_name_dict[feature], neighborhoods_dict[feature] = extract_neighborhood(
                     dios, list_nodes_raising_anomaly_full_name[feature], time_seconds, args)
                 # Nodes to check are the ones that have raised anomalies and their neighbours
                 nodes_to_check_dict[feature] = list_nodes_raising_anomaly[feature] + neighborhoods_dict[feature]
                 nodes_to_check_full_name_dict[feature] = list_nodes_raising_anomaly_full_name[feature] + \
                                                          neighborhoods_full_name_dict[feature]
-            # print('neighborhoods_dict: {}'.format(neighborhoods_dict))
-            # print('nodes_to_check_dict: {}'.format(nodes_to_check_dict))
             # Extract single list containing all nodes that raised an anomaly in either feature
             single_list_nodes_raising_anomaly = [node for feature_anom in features for node in
                                                  list_nodes_raising_anomaly[feature_anom]]
@@ -615,31 +417,22 @@ def parallel_main():
             # Print anomaly and nodes involved in the output file
             output_file.write(
                 'Anomaly raised at time {}. Devices involved: {}\n'.format(time_seconds, list_nodes_raising_anomaly))
-            # print('single_list_nodes_raising_anomaly: {}'.format(single_list_nodes_raising_anomaly))
             # Extract single list containing all neighbours of nodes that raised an anomaly in either feature
             single_list_neighbours = [node for feature_anom in features for node in neighborhoods_dict[feature_anom]]
             single_list_neighbours = list(set(single_list_neighbours))
-            # print('single_list_neighbours: {}'.format(single_list_neighbours))
             # Extract single list of anomalous nodes (nodes raising anoamly + neighbours)
             anomalous_nodes = [node for feature_anom in features for node in nodes_to_check_dict[feature_anom]]
             anomalous_nodes = list(set(anomalous_nodes))
-            # print('anomalous_nodes: {}'.format(anomalous_nodes))
             # Extract single list of anomalous nodes (nodes raising anoamly + neighbours)
             anomalous_nodes_full_name = [node for feature_anom in features for node in
                                          nodes_to_check_full_name_dict[feature_anom]]
             anomalous_nodes_full_name = list(set(anomalous_nodes_full_name))
-            # print('anomalous_nodes_full_name: {}'.format(anomalous_nodes_full_name))
             # Check if dodag changed or not
-            # dodag_changed, nodes_changing = extract_dodag_before_after(original_net_traffic, single_list_nodes_raising_anomaly,
-            #										   single_list_neighbours, time_seconds, args)
             dodag_changed, nodes_changing = extract_dodag_before_after(daos,
                                                                        single_list_nodes_raising_anomaly,
                                                                        single_list_neighbours, time_seconds, args)
 
             # Classify the attack
-            # print('Nodes changing: {}'.format(nodes_changing))
-            # classify_attack_from_dodag(all_series_attack_classification, original_net_traffic, anomalous_nodes, nodes_changing, #anomalous_nodes_full_name,
-            #						   time_step+train_length, dodag_changed, list_communicating_nodes_from_train, dict_nodes_dests_from_train, output_file, args)
             classify_attack_from_dodag(all_series_attack_classification, all_packets, ranks_vers, apps_packets,
                                        anomalous_nodes,
                                        nodes_changing,  # anomalous_nodes_full_name,
@@ -649,15 +442,8 @@ def parallel_main():
     # Closes txt file
     output_file.close()
     # Plot prediction times using box plot
-
     toc_main = tm.perf_counter()
     print('Whole main took: {}'.format(toc_main - tic_main))
-    '''
-	fig, ax = plt.subplots()
-	ax.set_title('Prediction Times')
-	ax.boxplot(list_pred_times, notch=True)
-	plt.show()
-	'''
 
 
 def arima_fit(histories, feature, node_index, all_files, tests, time_step, time_seconds, alpha):
@@ -665,11 +451,9 @@ def arima_fit(histories, feature, node_index, all_files, tests, time_step, time_
     node_full_name = all_files[node_index].split('/')[-1].split('\\')[-1].split('.')[0]
     conf_int = [[-0.1, 0.1] for x in range(1)]
     output = 0
-    # print(conf_int[0][1])
     # Monitor also time efficiency
     tic = tm.perf_counter()
     # Try to fit arima since it may return errors depending on matrices rank
-    # print('\nhistories[feature][node_name]: {}\n'.format(histories[feature][node_name]))
     try:
         warnings.filterwarnings("ignore")
         model = pm.auto_arima(histories[feature][node_name], start_p=1, start_q=1,
@@ -685,22 +469,15 @@ def arima_fit(histories, feature, node_index, all_files, tests, time_step, time_
                               suppress_warnings=True,
                               stepwise=True)
         output, conf_int = model.predict(n_periods=1, return_conf_int=True, alpha=alpha)
-    # print('\n\n\nnode name: {}\toutput: {}\n\n\n'.format(node_name, output))
     except:
         pass
     toc = tm.perf_counter()
-    # list_pred_times.append(toc - tic)
     single_pred_time = toc - tic
     # Append prediction and confidence interval to the corresponding dictionary entry
-    # predictions[feature][node_name].append(output)
-    # conf_intervals[feature][node_name].append(conf_int)
     # If real value is outside confidence range it is considered an anomaly
     if (tests[feature][node_name][time_step] < conf_int[0][0] or tests[feature][node_name][time_step] >
             conf_int[0][1]):
         # Update list of nodes to be checked and raise the anomaly
-        # bool_raise_anomaly = True
-        # list_nodes_raising_anomaly[feature].append(node_name)
-        # list_nodes_raising_anomaly_full_name[feature].append(node_full_name)
         node_raising_anomaly = node_name
         node_raising_anomaly_full_name = node_full_name
         print('Anomaly found in node {} at time {} for feature {}'.format(node_name, time_seconds, feature))
@@ -712,6 +489,8 @@ def arima_fit(histories, feature, node_index, all_files, tests, time_step, time_
 
 
 if __name__ == '__main__':
-    # new_main()
-    # try_main()
-    parallel_main()
+    parallelization = True
+    if parallelization:
+        parallel_main()
+    else:
+        main()
