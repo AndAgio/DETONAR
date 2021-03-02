@@ -147,7 +147,6 @@ def main():
     filenames = glob.glob(os.path.join(os.getcwd(), '..', args.data_dir, args.scenario,
                                        'Packet_Trace_' + str(int(args.simulation_time)) + 's', '*.csv'))
     filenames.sort()
-    print(filenames)
     ###################################################################################
     # This part is for debug only while trying out with parallelization
     if (args.single_sim != ''):
