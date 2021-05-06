@@ -1,5 +1,17 @@
 # DETONAR
 
+This repo contains the official implementation of our paper entitled *DETONAR: Detection of Routing Attacks in RPL-based IoT*. The full paper can be found [here.]: https://ieeexplore.ieee.org/document/9415869
+Consider citing our work:
+```
+@article{agiollo2021detonar,
+  title={DETONAR: Detection of Routing Attacks in RPL-based IoT},
+  author={Agiollo, Andrea and Conti, Mauro and Kaliyar, Pallavi and Lin, TsungNan and Pajola, Luca},
+  journal={IEEE Transactions on Network and Service Management},
+  year={2021},
+  publisher={IEEE}
+}
+```
+
 ## Feature extraction from CSVs
 We produce a python file in order to extract features of each device for each time window given the CSV file of a simulation.
 In particular, the file runs on all simulations of a specific attack like Blackhole.
