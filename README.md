@@ -1,6 +1,6 @@
 # DETONAR
 
-This repo contains the official implementation of our paper entitled *DETONAR: Detection of Routing Attacks in RPL-based IoT*. The full paper can be found [here.]: https://ieeexplore.ieee.org/document/9415869
+This repo contains the official implementation of our paper entitled *DETONAR: Detection of Routing Attacks in RPL-based IoT*. The full paper can be found [here](https://ieeexplore.ieee.org/document/9415869).
 Consider citing our work:
 ```
 @article{agiollo2021detonar,
